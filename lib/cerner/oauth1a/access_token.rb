@@ -2,7 +2,9 @@
 
 require 'cerner/oauth1a/oauth_error'
 require 'cerner/oauth1a/protocol'
+require 'cerner/oauth1a/request_proxy/base'
 require 'uri'
+require 'base64'
 
 module Cerner
   module OAuth1a
@@ -10,6 +12,38 @@ module Cerner
     # Public: A Cerner OAuth 1.0a Access Token and related request parameters for use in Consumer or
     # Service Provider use cases.
     class AccessToken
+      def self.from_request(request)
+        request = Cerner::OAuth1a::RequestProxy.proxy(request)
+
+        missing_params = []
+        consumer_key = request.consumer_key
+        missing_params << :oauth_consumer_key if consumer_key.nil? || consumer_key.empty?
+        nonce = request.nonce
+        missing_params << :oauth_nonce if nonce.nil? || nonce.empty?
+        timestamp = request.timestamp
+        missing_params << :oauth_timestamp if timestamp.nil? || timestamp.empty?
+        token = request.token
+        missing_params << :oauth_token if token.nil? || token.empty?
+        signature_method = request.signature_method
+        missing_params << :oauth_signature_method if signature_method.nil? || signature_method.empty?
+        signature = request.signature
+        missing_params << :oauth_signature if signature.nil? || signature.empty?
+        signature_base_string = request.signature_base_string
+
+        raise OAuthError.new('', nil, 'parameter_absent', missing_params) unless missing_params.empty?
+
+        AccessToken.new(
+          consumer_key: consumer_key,
+          nonce: nonce,
+          timestamp: timestamp,
+          token: token,
+          signature_method: signature_method,
+          signature: signature,
+          realm: params[:realm],
+          signature_base_string: signature_base_string
+        )
+      end
+
       # Public: Constructs an AccessToken using the value of an HTTP Authorization Header based on
       # the OAuth HTTP Authorization Scheme (https://oauth.net/core/1.0a/#auth_header).
       #
@@ -77,6 +111,8 @@ module Cerner
       attr_reader :consumer_principal
       # Returns a String, but may be nil, with the Protection Realm related to this token.
       attr_reader :realm
+      # The signature base string for a HMAC signature
+      attr_reader :signature_base_string
 
       # Public: Constructs an instance.
       #
@@ -110,7 +146,8 @@ module Cerner
         timestamp:,
         token:,
         token_secret: nil,
-        realm: nil
+        realm: nil,
+        signature_base_string: nil
       )
         raise ArgumentError, 'consumer_key is nil' unless consumer_key
         raise ArgumentError, 'nonce is nil' unless nonce
@@ -129,6 +166,7 @@ module Cerner
         @token = token
         @token_secret = token_secret || nil
         @realm = realm || nil
+        @signature_base_string = signature_base_string || nil
       end
 
       # Public: Generates a value suitable for use as an HTTP Authorization header. If #signature is
@@ -142,14 +180,18 @@ module Cerner
       def authorization_header
         return @authorization_header if @authorization_header
 
-        unless @signature_method == 'PLAINTEXT'
+        unless @signature_method == 'PLAINTEXT' || @signature_method == 'HMAC-SHA1'
           raise OAuthError.new('signature_method must be PLAINTEXT', nil, 'signature_method_rejected', nil, @realm)
         end
 
         if @signature
           sig = @signature
         elsif @accessor_secret && @token_secret
-          sig = "#{@accessor_secret}&#{@token_secret}"
+          if @signature_method == 'PLAINTEXT'
+            sig = "#{@accessor_secret}&#{@token_secret}"
+          else
+            sig = Base64.encode64(OpenSSL::HMAC.digest(OpenSSL::Digest.new('sha1'), "#{@accessor_secret}&#{@token_secret}", @signature_base_string))
+          end
         else
           raise OAuthError.new('accessor_secret or token_secret is nil', nil, 'parameter_absent', nil, @realm)
         end
@@ -191,7 +233,7 @@ module Cerner
         # Set realm to the provider's realm if it's not already set
         @realm ||= access_token_agent.realm
 
-        unless @signature_method == 'PLAINTEXT'
+        unless @signature_method == 'PLAINTEXT' || @signature_method == 'HMAC-SHA1'
           raise OAuthError.new('signature_method must be PLAINTEXT', nil, 'signature_method_rejected', nil, @realm)
         end
 
@@ -392,8 +434,18 @@ module Cerner
         secrets_parts = Protocol.parse_url_query_string(secrets)
         expected_signature = "#{secrets_parts[:ConsumerSecret]}&#{secrets_parts[:TokenSecret]}"
 
-        unless @signature == expected_signature
-          raise OAuthError.new('signature is not valid', nil, 'signature_invalid', nil, @realm)
+        if @signature_method == 'HMAC-SHA1'
+          unless @signature == Base64.encode64(
+            OpenSSL::HMAC.digest(OpenSSL::Digest.new('sha1')),
+            "#{secrets_parts[:ConsumerSecret]}&#{secrets_parts[:TokenSecret]}",
+            @signature_base_string
+            )
+            raise OAuthError.new('signature is not valid', nil, 'signature_invalid', nil, @realm)
+          end
+        else
+          unless @signature == expected_signature
+            raise OAuthError.new('signature is not valid', nil, 'signature_invalid', nil, @realm)
+          end
         end
       end
     end

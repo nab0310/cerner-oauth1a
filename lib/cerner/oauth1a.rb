@@ -6,4 +6,7 @@ require 'cerner/oauth1a/cache'
 require 'cerner/oauth1a/cache_rails' if defined?(::Rails) && defined?(::Rails.cache)
 require 'cerner/oauth1a/keys'
 require 'cerner/oauth1a/protocol'
+require 'cerner/oauth1a/request_proxy'
+require 'cerner/oauth1a/request_proxy/base'
+require 'cerner/oauth1a/request_proxy/rack_request'
 require 'cerner/oauth1a/version'
