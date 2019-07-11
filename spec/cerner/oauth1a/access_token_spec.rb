@@ -3,8 +3,48 @@
 require 'spec_helper'
 
 require 'cerner/oauth1a/access_token'
+require 'rack'
+require 'cerner/oauth1a/request_proxy/rack_request'
+require 'net/http'
 
 RSpec.describe Cerner::OAuth1a::AccessToken do
+  describe '.from_request' do
+    context 'raises error' do
+      it 'when the request is not supported' do
+        request = Net::HTTP::Get.new(URI.parse("http://example.com:8080?a=2"))
+        request['Authorization'] = 'OAuth oauth_consumer_key="consumer key", ' \
+        'oauth_nonce="nonce", ' \
+        'oauth_timestamp="1", ' \
+        'oauth_token="token", ' \
+        'oauth_signature_method="HMAC-SHA1", ' \
+        'oauth_signature="signature"'
+
+        expect do
+          Cerner::OAuth1a::AccessToken.from_request(request)
+        end.to(
+          raise_error(Cerner::OAuth1a::OAuthError, /unsupported_request_type/)
+        )
+      end
+    end
+
+    context 'does not raise error' do
+      it 'when the request header has all the required fields' do
+        request = Rack::Request.new(Rack::MockRequest.env_for("http://example.com:8080?a=2", {'method': 'GET'}))
+
+        request.add_header('Authorization',
+          'OAuth oauth_consumer_key="consumer key", ' \
+          'oauth_nonce="nonce", ' \
+          'oauth_timestamp="1", ' \
+          'oauth_token="token", ' \
+          'oauth_signature_method="HMAC-SHA1", ' \
+          'oauth_signature="signature"')
+        access_token = Cerner::OAuth1a::AccessToken.from_request(request)
+
+        expect(access_token).to be_a(Cerner::OAuth1a::AccessToken)
+      end
+    end
+  end
+
   describe '.from_authorization_header' do
     context 'raises error' do
       it 'when oauth_version is not 1.0' do
@@ -321,7 +361,7 @@ RSpec.describe Cerner::OAuth1a::AccessToken do
         end
       end
 
-      it 'when signature does not match secrets' do
+      it 'when PLAINTEXT signature does not match secrets' do
         at = Cerner::OAuth1a::AccessToken.new(
           consumer_key: 'CONSUMER KEY',
           nonce: 'NONCE',
@@ -329,6 +369,34 @@ RSpec.describe Cerner::OAuth1a::AccessToken do
           token: "ConsumerKey=CONSUMER+KEY&ExpiresOn=#{Time.now.utc.to_i + 60}&KeysVersion=1&HMACSecrets=SECRETS",
           signature: 'SIGNATURE',
           realm: 'REALM'
+        )
+        keys = double('Keys')
+        expect(keys).to receive(:verify_rsasha1_signature).and_return(true)
+        expect(keys).to(
+          receive(:decrypt_hmac_secrets)
+            .with('SECRETS')
+            .and_return('ConsumerSecret=CONSUMER+SECRET&TokenSecret=TOKEN+SECRET')
+        )
+        ata = double('AccessTokenAgent')
+        expect(ata).to receive(:retrieve_keys).with('1').and_return(keys)
+        expect(ata).to receive(:realm_eql?).and_return(true)
+        expect { at.authenticate(ata) }.to raise_error do |error|
+          expect(error).to be_a(Cerner::OAuth1a::OAuthError)
+          expect(error.message).to include 'signature_invalid'
+          expect(error.realm).to eq('REALM')
+        end
+      end
+
+      it 'when HMAC-SHA1 signature does not match secrets' do
+        at = Cerner::OAuth1a::AccessToken.new(
+          consumer_key: 'CONSUMER KEY',
+          nonce: 'NONCE',
+          timestamp: Time.now,
+          token: "ConsumerKey=CONSUMER+KEY&ExpiresOn=#{Time.now.utc.to_i + 60}&KeysVersion=1&HMACSecrets=SECRETS",
+          signature: 'SIGNATURE',
+          realm: 'REALM',
+          signature_method: 'HMAC-SHA1',
+          signature_base_string: 'SIGNATURE BASE'
         )
         keys = double('Keys')
         expect(keys).to receive(:verify_rsasha1_signature).and_return(true)
@@ -395,6 +463,29 @@ RSpec.describe Cerner::OAuth1a::AccessToken do
         expect(at.consumer_principal).to be(nil)
         expect(at.authenticate(ata)).to eq('Extra': 'SOMETHING')
         expect(at.consumer_principal).to eq('CONSUMER PRINCIPAL')
+      end
+
+      it 'that is empty when signature is signed by HMAC-SHA1' do
+        at = Cerner::OAuth1a::AccessToken.new(
+          consumer_key: 'CONSUMER KEY',
+          nonce: 'NONCE',
+          timestamp: Time.now,
+          token: "ConsumerKey=CONSUMER+KEY&ExpiresOn=#{Time.now.utc.to_i + 60}&KeysVersion=1&HMACSecrets=SECRETS",
+          signature_method: 'HMAC-SHA1',
+          signature_base_string: 'SIGNATURE BASE',
+          signature: Base64.encode64(OpenSSL::HMAC.digest(OpenSSL::Digest.new('sha1'),'CONSUMER SECRET&TOKEN SECRET', 'SIGNATURE BASE'))
+        )
+        keys = double('Keys')
+        expect(keys).to receive(:verify_rsasha1_signature).and_return(true)
+        expect(keys).to(
+          receive(:decrypt_hmac_secrets)
+            .with('SECRETS')
+            .and_return('ConsumerSecret=CONSUMER+SECRET&TokenSecret=TOKEN+SECRET')
+        )
+        ata = double('AccessTokenAgent')
+        expect(ata).to receive(:retrieve_keys).with('1').and_return(keys)
+        expect(ata).to receive(:realm).and_return('REALM')
+        expect(at.authenticate(ata)).to eq({})
       end
     end
 
@@ -872,6 +963,30 @@ RSpec.describe Cerner::OAuth1a::AccessToken do
           token_secret: 'TOKEN SECRET'
         )
       end.to raise_error(ArgumentError, /token/)
+    end
+
+    it 'accepts a signature signed with HMAC-SHA1' do
+      access_token = Cerner::OAuth1a::AccessToken.new(
+        consumer_key: 'CONSUMER KEY',
+        nonce: 'NONCE',
+        timestamp: Time.now,
+        token: 'TOKEN',
+        signature_method: 'HMAC-SHA1',
+        signature_base_string: 'SIGNATURE BASE'
+      )
+      expect(access_token.signature_method).to eq 'HMAC-SHA1'
+    end
+
+    it 'requires a signature_base_string if the signature is signed with HMAC-SHA1' do
+      expect do
+        Cerner::OAuth1a::AccessToken.new(
+          consumer_key: 'CONSUMER KEY',
+          nonce: 'NONCE',
+          timestamp: Time.now,
+          token: 'TOKEN',
+          signature_method: 'HMAC-SHA1'
+        )
+      end.to raise_error(Cerner::OAuth1a::OAuthError, /missing_signature_base_string/)
     end
   end
 end

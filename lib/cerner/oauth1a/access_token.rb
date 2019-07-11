@@ -39,11 +39,12 @@ module Cerner
           token: token,
           signature_method: signature_method,
           signature: signature,
-          realm: params[:realm],
+          realm: request.realm,
           signature_base_string: signature_base_string
         )
       end
 
+      # Deprecated: Use from_request(request) in order to create an AccessToken.
       # Public: Constructs an AccessToken using the value of an HTTP Authorization Header based on
       # the OAuth HTTP Authorization Scheme (https://oauth.net/core/1.0a/#auth_header).
       #
@@ -166,6 +167,9 @@ module Cerner
         @token = token
         @token_secret = token_secret || nil
         @realm = realm || nil
+        if @signature_method == 'HMAC-SHA1' && !signature_base_string
+          raise OAuthError.new('signature_base_string is required if the request is signed with HMAC-SHA1', nil, 'missing_signature_base_string', nil, @realm)
+        end
         @signature_base_string = signature_base_string || nil
       end
 
@@ -432,18 +436,16 @@ module Cerner
         end
 
         secrets_parts = Protocol.parse_url_query_string(secrets)
-        expected_signature = "#{secrets_parts[:ConsumerSecret]}&#{secrets_parts[:TokenSecret]}"
 
-        if @signature_method == 'HMAC-SHA1'
-          unless @signature == Base64.encode64(
-            OpenSSL::HMAC.digest(OpenSSL::Digest.new('sha1')),
-            "#{secrets_parts[:ConsumerSecret]}&#{secrets_parts[:TokenSecret]}",
-            @signature_base_string
-            )
+        if @signature_method == 'PLAINTEXT'
+          unless @signature == "#{secrets_parts[:ConsumerSecret]}&#{secrets_parts[:TokenSecret]}"
             raise OAuthError.new('signature is not valid', nil, 'signature_invalid', nil, @realm)
           end
         else
-          unless @signature == expected_signature
+          unless @signature == Base64.encode64(
+            OpenSSL::HMAC.digest(OpenSSL::Digest.new('sha1'),
+            "#{secrets_parts[:ConsumerSecret]}&#{secrets_parts[:TokenSecret]}",
+            @signature_base_string))
             raise OAuthError.new('signature is not valid', nil, 'signature_invalid', nil, @realm)
           end
         end

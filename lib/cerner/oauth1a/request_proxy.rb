@@ -11,7 +11,7 @@ module Cerner
 
       # Public: Proxies the request into a Cerner::OAuth1a::RequestProxy subclass.
       def self.proxy(request)
-        return request if request.is_a?(Cerner::OAuth1a::RequestProxy::Base)
+        return request if request.is_a?(Cerner::OAuth1a::RequestProxy::Base) && !request.instance_of?(Cerner::OAuth1a::RequestProxy::Base)
 
         klass = available_proxies[request.class]
 
@@ -21,7 +21,7 @@ module Cerner
           klass = available_proxies[request_parent]
         end
 
-        raise UnknownRequestType, request.class.to_s unless klass
+        raise OAuthError.new('request type is not supported', nil, 'unsupported_request_type', nil, nil) unless klass
 
         klass.new(request)
       end

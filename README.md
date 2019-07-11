@@ -55,11 +55,8 @@ implement that:
 
 ## Service Provider Use Case
 
-    # Acquire Authorization header value from HTTP server's request
-    authz_header = request['Authorization']
-
-    # Parse the header value
-    access_token = Cerner::OAuth1a::AccessToken.from_authorization_header(authz_header)
+    # Create an access token from the request
+    access_token = Cerner::OAuth1a::AccessToken.from_request(request)
 
     # Authenticate the Access Token
     # Note: An AccessTokenAgent, configured with a System Account that has been granted privileges

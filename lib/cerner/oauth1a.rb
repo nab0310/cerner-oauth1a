@@ -8,5 +8,5 @@ require 'cerner/oauth1a/keys'
 require 'cerner/oauth1a/protocol'
 require 'cerner/oauth1a/request_proxy'
 require 'cerner/oauth1a/request_proxy/base'
-require 'cerner/oauth1a/request_proxy/rack_request'
+require 'cerner/oauth1a/request_proxy/rack_request' if defined?(::Rack) && defined?(::Rack::Request)
 require 'cerner/oauth1a/version'
