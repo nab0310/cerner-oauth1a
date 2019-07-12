@@ -14,73 +14,28 @@ module Cerner
           Cerner::OAuth1a::RequestProxy.available_proxies[klass] = self
         end
 
-        attr_accessor :request
+        attr_reader :request
 
         def initialize(request)
           @request = request
         end
 
-        def accessor_secret
-          parameters[:accessor_secret]
+        def uri
+          raise NotImplementedError, 'Must be implemented by subclasses'
         end
 
-        def consumer_key
-          parameters[:oauth_consumer_key]
+        def method
+          raise NotImplementedError, 'Must be implemented by subclasses'
         end
 
-        def expires_at
-          parameters[:expires_at]
-        end
-
-        def nonce
-          parameters[:oauth_nonce]
-        end
-
-        def timestamp
-          parameters[:oauth_timestamp]
-        end
-
-        def token
-          parameters[:oauth_token]
-        end
-
-        def token_secret
-          parameters[:token_secret]
-        end
-
-        def signature_method
-          parameters[:oauth_signature_method]
-        end
-
-        def signature
-          parameters[:oauth_signature]
-        end
-
-        def consumer_principal
-          parameters[:consumer_principal]
-        end
-
-        def realm
-          parameters[:realm]
+        def parameters
+          raise NotImplementedError, 'Must be implemented by subclasses'
         end
 
         def signature_base_string
           base = [method, normalized_uri, normalized_parameters]
           base.map { |v| URI::DEFAULT_PARSER.escape(v.to_s.to_str, /[^a-zA-Z0-9\-\.\_\~]/) }.join('&')
         end
-
-        protected
-          def uri
-            raise NotImplementedError, 'Must be implemented by subclasses'
-          end
-  
-          def method
-            raise NotImplementedError, 'Must be implemented by subclasses'
-          end
-  
-          def parameters
-            raise NotImplementedError, 'Must be implemented by subclasses'
-          end
 
         private
         def normalized_uri

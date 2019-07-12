@@ -16,19 +16,18 @@ module Cerner
         request = Cerner::OAuth1a::RequestProxy.proxy(request)
 
         missing_params = []
-        consumer_key = request.consumer_key
+        consumer_key = request.parameters[:oauth_consumer_key]
         missing_params << :oauth_consumer_key if consumer_key.nil? || consumer_key.empty?
-        nonce = request.nonce
+        nonce = request.parameters[:oauth_nonce]
         missing_params << :oauth_nonce if nonce.nil? || nonce.empty?
-        timestamp = request.timestamp
+        timestamp = request.parameters[:oauth_timestamp]
         missing_params << :oauth_timestamp if timestamp.nil? || timestamp.empty?
-        token = request.token
+        token = request.parameters[:oauth_token]
         missing_params << :oauth_token if token.nil? || token.empty?
-        signature_method = request.signature_method
+        signature_method = request.parameters[:oauth_signature_method]
         missing_params << :oauth_signature_method if signature_method.nil? || signature_method.empty?
-        signature = request.signature
+        signature = request.parameters[:oauth_signature]
         missing_params << :oauth_signature if signature.nil? || signature.empty?
-        signature_base_string = request.signature_base_string
 
         raise OAuthError.new('', nil, 'parameter_absent', missing_params) unless missing_params.empty?
 
@@ -39,8 +38,8 @@ module Cerner
           token: token,
           signature_method: signature_method,
           signature: signature,
-          realm: request.realm,
-          signature_base_string: signature_base_string
+          realm: request.parameters[:realm],
+          signature_base_string: request.signature_base_string
         )
       end
 
